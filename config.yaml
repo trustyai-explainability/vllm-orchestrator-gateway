@@ -1,0 +1,16 @@
+orchestrator:
+  host: localhost
+  port: 8085
+detectors:
+  - name: regex
+    detector_params:
+      regex:
+        - email
+        - ssn
+  - name: other_detector
+routes:
+  - name: pii
+    detectors:
+      - regex
+  - name: passthrough
+    detectors:
