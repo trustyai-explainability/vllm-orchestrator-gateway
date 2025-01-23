@@ -658,23 +658,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4ee93343901ab17bd981295f2cf0026d4ad018c7c31ba84549a4ddbb47a45104"
 
 [[package]]
-name = "local-detectors"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "axum",
- "regex",
- "reqwest",
- "serde",
- "serde_json",
- "serde_yml",
- "tokio",
- "tower-http",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "lock_api"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1534,6 +1517,23 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "vllm-orchestrator-gateway"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serde_yml",
+ "tokio",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+]
 
 [[package]]
 name = "want"

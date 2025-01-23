@@ -1,6 +1,5 @@
-use std::{collections::HashMap, net::SocketAddr};
+use std::{collections::HashMap, env, net::SocketAddr};
 
-use anyhow::{Error, Ok};
 use axum::{routing::post, Json, Router};
 use config::{validate_registered_detectors, DetectorConfig, GatewayConfig};
 use serde::Serialize;
@@ -63,7 +62,15 @@ async fn main() {
         tracing::info!("exposed endpoints: {}", path);
     }
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], 8090));
+    let mut http_port = 8090;
+    if let Ok(port) = env::var("HTTP_PORT") {
+        match port.parse::<u16>() {
+            Ok(port) => http_port = port,
+            Err(err) => println!("{}", err),
+        }
+    }
+
+    let addr = SocketAddr::from(([127, 0, 0, 1], http_port));
     tracing::info!("listening on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
@@ -95,7 +102,7 @@ async fn handle_generation(
 async fn orchestrator_post_request(
     payload: Option<&mut Map<String, Value>>,
     url: &str,
-) -> Result<serde_json::Value, Error> {
+) -> Result<serde_json::Value, anyhow::Error> {
     let client = reqwest::Client::new();
     let response = client.post(url).json(&payload).send();
 
