@@ -35,7 +35,8 @@ fn get_orchestrator_detectors(
 
 #[tokio::main]
 async fn main() {
-    let gateway_config = config::read_config("./config.yaml");
+    let config_path = env::var("GATEWAY_CONFIG").unwrap_or("config/config.yaml".to_string());
+    let gateway_config = config::read_config(&config_path);
     validate_registered_detectors(&gateway_config);
 
     tracing_subscriber::fmt()
