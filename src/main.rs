@@ -53,7 +53,7 @@ async fn main() {
     for route in gateway_config.routes.iter() {
         let gateway_config = gateway_config.clone();
         let detectors = route.detectors.clone();
-        let path = format!("/{}", route.name);
+        let path = format!("/{}/v1/chat/completions", route.name);
         app = app.route(
             &path,
             post(|Json(payload): Json<serde_json::Value>| {
