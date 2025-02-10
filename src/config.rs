@@ -28,7 +28,7 @@ pub struct RouteConfig {
 }
 
 pub fn read_config(path: &str) -> GatewayConfig {
-    let result = fs::read_to_string(path).expect("could not read file: {path}");
+    let result = fs::read_to_string(path).expect(&format!("could not read file: {}", path));
 
     serde_yml::from_str(&result).expect("failed to read in yaml config")
 }
