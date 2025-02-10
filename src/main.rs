@@ -1,4 +1,8 @@
-use std::{collections::HashMap, env, net::SocketAddr};
+use std::{
+    collections::HashMap,
+    env,
+    net::{IpAddr, SocketAddr},
+};
 
 use axum::{routing::post, Json, Router};
 use config::{validate_registered_detectors, DetectorConfig, GatewayConfig};
@@ -71,7 +75,10 @@ async fn main() {
         }
     }
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], http_port));
+    let host = env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
+
+    let ip: IpAddr = host.parse().expect("Failed to parse host IP address");
+    let addr = SocketAddr::from((ip, http_port));
     tracing::info!("listening on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
