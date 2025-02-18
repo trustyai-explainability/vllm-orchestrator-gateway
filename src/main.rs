@@ -4,11 +4,11 @@ use std::{
     net::{IpAddr, SocketAddr},
 };
 
-use axum::{http::StatusCode, routing::post, Json, Router, response::IntoResponse};
+use axum::{http::StatusCode, response::IntoResponse, routing::post, Json, Router};
 use config::{validate_registered_detectors, DetectorConfig, GatewayConfig};
 use serde::Serialize;
-use serde_json::{Map, Value};
 use serde_json::json;
+use serde_json::{Map, Value};
 use tower_http::trace::{self, TraceLayer};
 use tracing::Level;
 
@@ -86,7 +86,6 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
-// still need to handle sending back to client
 async fn handle_generation(
     Json(mut payload): Json<serde_json::Value>,
     detectors: Vec<String>,
