@@ -4,10 +4,11 @@ use std::{
     net::{IpAddr, SocketAddr},
 };
 
-use axum::{routing::post, Json, Router};
+use axum::{http::StatusCode, routing::post, Json, Router, response::IntoResponse};
 use config::{validate_registered_detectors, DetectorConfig, GatewayConfig};
 use serde::Serialize;
 use serde_json::{Map, Value};
+use serde_json::json;
 use tower_http::trace::{self, TraceLayer};
 use tracing::Level;
 
@@ -90,7 +91,7 @@ async fn handle_generation(
     Json(mut payload): Json<serde_json::Value>,
     detectors: Vec<String>,
     gateway_config: GatewayConfig,
-) {
+) -> Result<impl IntoResponse, (StatusCode, String)> {
     let orchestrator_detectors = get_orchestrator_detectors(detectors, gateway_config.detectors);
 
     let mut payload = payload.as_object_mut();
@@ -104,7 +105,9 @@ async fn handle_generation(
         "detectors".to_string(),
         serde_json::to_value(&orchestrator_detectors).unwrap(),
     );
-    let _ = orchestrator_post_request(payload, &url).await;
+    let response_payload = orchestrator_post_request(payload, &url).await;
+
+    Ok(Json(json!(response_payload.unwrap())).into_response())
 }
 
 async fn orchestrator_post_request(
