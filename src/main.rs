@@ -3,38 +3,42 @@ use std::{
     env,
     net::{IpAddr, SocketAddr},
 };
-
+use std::ptr::null;
 use axum::{http::StatusCode, response::IntoResponse, routing::post, Json, Router};
 use config::{validate_registered_detectors, DetectorConfig, GatewayConfig};
-use serde::Serialize;
 use serde_json::json;
 use serde_json::{Map, Value};
 use tower_http::trace::{self, TraceLayer};
 use tracing::Level;
+use crate::api::{GenerationChoice, GenerationMessage, OrchestratorResponse};
+use crate::config::RouteConfig;
 
 mod config;
+mod api;
 
-#[derive(Debug, Serialize)]
-struct OrchestratorDetector {
-    input: HashMap<String, serde_json::Value>,
-    // implement when output is completed, also need to see about splitting detectors in config to input/output
-    // output: HashMap<String, serde_json::Value>,
-}
 
 fn get_orchestrator_detectors(
     detectors: Vec<String>,
     detector_config: Vec<DetectorConfig>,
-) -> OrchestratorDetector {
+) -> api::OrchestratorDetector {
     let mut input_detectors = HashMap::new();
+    let mut output_detectors = HashMap::new();
 
     for detector in detector_config {
         if detectors.contains(&detector.name) && detector.detector_params.is_some() {
-            input_detectors.insert(detector.name, detector.detector_params.unwrap());
+            let detector_params = detector.detector_params.unwrap();
+            if detector.input {
+                input_detectors.insert(detector.name.clone(), detector_params.clone());
+            }
+            if detector.output {
+                output_detectors.insert(detector.name, detector_params);
+            }
         }
     }
 
-    OrchestratorDetector {
+    api::OrchestratorDetector {
         input: input_detectors,
+        output: output_detectors,
     }
 }
 
@@ -59,10 +63,11 @@ async fn main() {
         let gateway_config = gateway_config.clone();
         let detectors = route.detectors.clone();
         let path = format!("/{}/v1/chat/completions", route.name);
+        let fallback_message = route.fallback_message.clone();
         app = app.route(
             &path,
             post(|Json(payload): Json<serde_json::Value>| {
-                handle_generation(Json(payload), detectors, gateway_config)
+                handle_generation(Json(payload), detectors, gateway_config, fallback_message)
             }),
         );
         tracing::info!("exposed endpoints: {}", path);
@@ -86,27 +91,66 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
+
+async fn handle_orchestrator_payload_parsing(orchestrator_response: &mut OrchestratorResponse, route_fallback_message: Option<String>) {
+    if route_fallback_message.is_some() && orchestrator_response.detections.is_some() {
+        let fallback_generation = GenerationMessage {
+            content: route_fallback_message.clone().unwrap(),
+            refusal: None,
+            role: String::from("assistant"),
+            tool_calls: None,
+            audio: None,
+        };
+
+        orchestrator_response.choices = vec![GenerationChoice {
+            message: fallback_generation,
+            finish_reason: String::from("stop"),
+            index: 0,
+            logprobs: None
+        }];
+    }
+}
+
 async fn handle_generation(
     Json(mut payload): Json<serde_json::Value>,
     detectors: Vec<String>,
     gateway_config: GatewayConfig,
+    route_fallback_message: Option<String>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
     let orchestrator_detectors = get_orchestrator_detectors(detectors, gateway_config.detectors);
 
     let mut payload = payload.as_object_mut();
 
-    let url = format!(
-        "http://{}:{}/api/v2/chat/completions-detection",
-        gateway_config.orchestrator.host, gateway_config.orchestrator.port
-    );
+    let url;
+    if gateway_config.orchestrator.port.is_some() {
+        url = format!(
+            "http://{}:{}/api/v2/chat/completions-detection",
+            gateway_config.orchestrator.host, gateway_config.orchestrator.port.unwrap()
+        );
+    } else {
+        url = format!(
+            "https://{}/api/v2/chat/completions-detection",
+            gateway_config.orchestrator.host
+        );
+    }
+
 
     payload.as_mut().unwrap().insert(
         "detectors".to_string(),
         serde_json::to_value(&orchestrator_detectors).unwrap(),
     );
     let response_payload = orchestrator_post_request(payload, &url).await;
+    if response_payload.is_ok() {
+        let response_unwrapped = response_payload.unwrap();
+        println!("{}", response_unwrapped);
 
-    Ok(Json(json!(response_payload.unwrap())).into_response())
+        let mut response : OrchestratorResponse = serde_json::from_value(response_unwrapped).unwrap();
+        handle_orchestrator_payload_parsing(&mut response, route_fallback_message).await;
+        Ok(Json(json!(response)).into_response())
+    } else {
+        //println!("{:#?}", response_payload.err().unwrap().to_string());
+        Err((StatusCode::INTERNAL_SERVER_ERROR, response_payload.err().unwrap().to_string()))
+    }
 }
 
 async fn orchestrator_post_request(
@@ -117,6 +161,5 @@ async fn orchestrator_post_request(
     let response = client.post(url).json(&payload).send();
 
     let json = response.await?.json().await?;
-    println!("{:#?}", json);
     Ok(json)
 }
