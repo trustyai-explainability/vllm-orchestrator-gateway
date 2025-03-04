@@ -12,12 +12,14 @@ pub struct GatewayConfig {
 #[derive(Debug, Deserialize, Clone)]
 pub struct OrchestratorConfig {
     pub host: String,
-    pub port: u16,
+    pub port: Option<u16>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct DetectorConfig {
     pub name: String,
+    pub input: bool,
+    pub output: bool,
     pub detector_params: Option<serde_json::Value>,
 }
 
@@ -25,6 +27,7 @@ pub struct DetectorConfig {
 pub struct RouteConfig {
     pub name: String,
     pub detectors: Vec<String>,
+    pub fallback_message: Option<String>,
 }
 
 pub fn read_config(path: &str) -> GatewayConfig {
@@ -62,7 +65,7 @@ mod tests {
         let gc = GatewayConfig {
             orchestrator: OrchestratorConfig {
                 host: "localhost".to_string(),
-                port: 1234,
+                port: Some(1234),
             },
             detectors: vec![DetectorConfig {
                 name: "regex".to_string(),
