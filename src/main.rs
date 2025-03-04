@@ -1,26 +1,26 @@
+use axum::{http::StatusCode, response::IntoResponse, routing::post, Json, Router};
+use config::{validate_registered_detectors, DetectorConfig, GatewayConfig};
+use serde_json::json;
+use serde_json::{Map, Value};
 use std::{
     collections::HashMap,
     env,
     net::{IpAddr, SocketAddr},
 };
-use std::ptr::null;
-use axum::{http::StatusCode, response::IntoResponse, routing::post, Json, Router};
-use config::{validate_registered_detectors, DetectorConfig, GatewayConfig};
-use serde_json::json;
-use serde_json::{Map, Value};
 use tower_http::trace::{self, TraceLayer};
 use tracing::Level;
-use crate::api::{GenerationChoice, GenerationMessage, OrchestratorResponse};
-use crate::config::RouteConfig;
 
-mod config;
 mod api;
+mod config;
 
+use api::{
+    Detections, GenerationChoice, GenerationMessage, OrchestratorDetector, OrchestratorResponse,
+};
 
 fn get_orchestrator_detectors(
     detectors: Vec<String>,
     detector_config: Vec<DetectorConfig>,
-) -> api::OrchestratorDetector {
+) -> OrchestratorDetector {
     let mut input_detectors = HashMap::new();
     let mut output_detectors = HashMap::new();
 
@@ -36,7 +36,7 @@ fn get_orchestrator_detectors(
         }
     }
 
-    api::OrchestratorDetector {
+    OrchestratorDetector {
         input: input_detectors,
         output: output_detectors,
     }
@@ -85,30 +85,27 @@ async fn main() {
 
     let ip: IpAddr = host.parse().expect("Failed to parse host IP address");
     let addr = SocketAddr::from((ip, http_port));
-    tracing::info!("listening on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    tracing::info!("listening on {}", addr);
+
     axum::serve(listener, app).await.unwrap();
 }
 
-
-async fn handle_orchestrator_payload_parsing(orchestrator_response: &mut OrchestratorResponse, route_fallback_message: Option<String>) {
-    if route_fallback_message.is_some() && orchestrator_response.detections.is_some() {
-        let fallback_generation = GenerationMessage {
-            content: route_fallback_message.clone().unwrap(),
-            refusal: None,
-            role: String::from("assistant"),
-            tool_calls: None,
-            audio: None,
-        };
-
-        orchestrator_response.choices = vec![GenerationChoice {
-            message: fallback_generation,
+fn check_payload_detections(
+    detections: &Option<Detections>,
+    route_fallback_message: Option<String>,
+) -> Option<GenerationChoice> {
+    if let (Some(fallback_message), Some(_)) = (route_fallback_message, detections) {
+        return Some(GenerationChoice {
+            message: GenerationMessage::new(fallback_message),
             finish_reason: String::from("stop"),
             index: 0,
-            logprobs: None
-        }];
+            logprobs: None,
+        });
     }
+
+    None
 }
 
 async fn handle_generation(
@@ -121,45 +118,47 @@ async fn handle_generation(
 
     let mut payload = payload.as_object_mut();
 
-    let url;
-    if gateway_config.orchestrator.port.is_some() {
-        url = format!(
+    let url: String = match gateway_config.orchestrator.port {
+        Some(port) => format!(
             "http://{}:{}/api/v2/chat/completions-detection",
-            gateway_config.orchestrator.host, gateway_config.orchestrator.port.unwrap()
-        );
-    } else {
-        url = format!(
+            gateway_config.orchestrator.host, port
+        ),
+        None => format!(
             "https://{}/api/v2/chat/completions-detection",
             gateway_config.orchestrator.host
-        );
-    }
-
+        ),
+    };
 
     payload.as_mut().unwrap().insert(
         "detectors".to_string(),
         serde_json::to_value(&orchestrator_detectors).unwrap(),
     );
-    let response_payload = orchestrator_post_request(payload, &url).await;
-    if response_payload.is_ok() {
-        let response_unwrapped = response_payload.unwrap();
-        println!("{}", response_unwrapped);
 
-        let mut response : OrchestratorResponse = serde_json::from_value(response_unwrapped).unwrap();
-        handle_orchestrator_payload_parsing(&mut response, route_fallback_message).await;
-        Ok(Json(json!(response)).into_response())
-    } else {
-        //println!("{:#?}", response_payload.err().unwrap().to_string());
-        Err((StatusCode::INTERNAL_SERVER_ERROR, response_payload.err().unwrap().to_string()))
+    let response_result = orchestrator_post_request(payload, &url).await;
+
+    match response_result {
+        Ok(mut orchestrator_response) => {
+            let detection =
+                check_payload_detections(&orchestrator_response.detections, route_fallback_message);
+            if let Some(message) = detection {
+                orchestrator_response.choices = vec![message];
+            }
+            Ok(Json(json!(orchestrator_response)).into_response())
+        }
+        Err(_) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            response_result.err().unwrap().to_string(),
+        )),
     }
 }
 
 async fn orchestrator_post_request(
     payload: Option<&mut Map<String, Value>>,
     url: &str,
-) -> Result<serde_json::Value, anyhow::Error> {
+) -> Result<OrchestratorResponse, anyhow::Error> {
     let client = reqwest::Client::new();
     let response = client.post(url).json(&payload).send();
 
     let json = response.await?.json().await?;
-    Ok(json)
+    Ok(serde_json::from_value(json).expect("unexpected json response from request"))
 }

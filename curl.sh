@@ -1,10 +1,9 @@
 #!/bin/bash
 
 # curl "localhost:8032/v1/chat/completions" \
-curl "localhost:8090/passthrough" \
+curl "localhost:8090/pii/v1/chat/completions" \
     -H "Content-Type: application/json" \
     -d '{
-        "max_completion_tokens": 1,
         "model": "Qwen/Qwen2.5-1.5B-Instruct",
         "messages": [
             {
