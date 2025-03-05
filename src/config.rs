@@ -69,11 +69,14 @@ mod tests {
             },
             detectors: vec![DetectorConfig {
                 name: "regex".to_string(),
+                input: false,
+                output: false,
                 detector_params: None,
             }],
             routes: vec![RouteConfig {
                 name: "route1".to_string(),
                 detectors: vec!["regex".to_string(), "not_existent_detector".to_string()],
+                fallback_message: None,
             }],
         };
 

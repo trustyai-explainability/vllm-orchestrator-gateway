@@ -1,31 +1,40 @@
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Debug, Serialize)]
-pub(crate) struct OrchestratorDetector {
-    pub(crate) input: HashMap<String, serde_json::Value>,
-    pub(crate) output: HashMap<String, serde_json::Value>,
-    // implement when output is completed, also need to see about splitting detectors in config to input/output
-    // output: HashMap<String, serde_json::Value>,
+pub struct OrchestratorDetector {
+    pub input: HashMap<String, serde_json::Value>,
+    pub output: HashMap<String, serde_json::Value>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub(crate) struct GenerationMessage {
-    pub(crate) content: String,
-    pub(crate) refusal: Option<String>,
-    pub(crate) role: String,
-    pub(crate) tool_calls: Option<serde_json::Value>,
-    pub(crate) audio: Option<serde_json::Value>,
+pub struct GenerationMessage {
+    pub content: String,
+    pub refusal: Option<String>,
+    pub role: String,
+    pub tool_calls: Option<serde_json::Value>,
+    pub audio: Option<serde_json::Value>,
+}
+
+impl GenerationMessage {
+    pub fn new(message: String) -> Self {
+        GenerationMessage {
+            content: message,
+            refusal: None,
+            role: String::from("assistant"),
+            tool_calls: None,
+            audio: None,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub(crate) struct GenerationChoice {
-    pub(crate) finish_reason: String,
-    pub(crate) index: u32,
-    pub(crate) message: GenerationMessage,
-    pub(crate) logprobs: Option<serde_json::Value>,
+pub struct GenerationChoice {
+    pub finish_reason: String,
+    pub index: u32,
+    pub message: GenerationMessage,
+    pub logprobs: Option<serde_json::Value>,
 }
-
 
 #[derive(Serialize, Deserialize, Debug)]
 struct DetectionResult {
@@ -41,32 +50,31 @@ struct DetectionResult {
 #[derive(Serialize, Deserialize, Debug)]
 struct InputDetection {
     message_index: u16,
-    results: Option<Vec<DetectionResult>>
+    results: Option<Vec<DetectionResult>>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 struct OutputDetection {
     choice_index: u32,
-    results: Option<Vec<DetectionResult>>
+    results: Option<Vec<DetectionResult>>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub(crate) struct Detections {
+pub struct Detections {
     input: Option<Vec<InputDetection>>,
     output: Option<Vec<OutputDetection>>,
 }
 
-
 #[derive(Serialize, Deserialize, Debug)]
-pub(crate) struct OrchestratorResponse {
+pub struct OrchestratorResponse {
     id: String,
-    pub(crate) choices: Vec<GenerationChoice>,
+    pub choices: Vec<GenerationChoice>,
     created: u64,
     model: String,
     service_tier: Option<String>,
     system_fingerprint: Option<String>,
     object: Option<String>,
     usage: serde_json::Value,
-    pub(crate) detections: Option<Detections>,
-    pub(crate) warnings: Option<Vec<HashMap<String, String>>>
+    pub detections: Option<Detections>,
+    pub warnings: Option<Vec<HashMap<String, String>>>,
 }

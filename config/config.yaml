@@ -1,16 +1,18 @@
 orchestrator:
-  host: guardrails-orchestrator-http-model-namespace.apps.rosa.trustyai-rob2.n1ai.p3.openshiftapps.com
+  host: localhost
+  port: 8085
 detectors:
-  - name: regex_language
+  - name: regex-language
+    input: false
+    output: true
     detector_params:
       regex:
         - email
         - ssn
-  - name: other_detector
 routes:
   - name: pii
     detectors:
-      - regex_language
-    fallback_message: "I'm sorry Dave, I'm afraid I can't do that."
+      - regex-language
+    fallback_message: "I'm sorry, I'm afraid I can't do that."
   - name: passthrough
     detectors:
