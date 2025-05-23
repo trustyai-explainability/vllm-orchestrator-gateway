@@ -3,7 +3,7 @@ ARG UBI_BASE_IMAGE_TAG=latest
 
 ## Rust builder ################################################################
 # Specific debian version so that compatible glibc version is used
-FROM rust:1.84.0-bullseye AS rust-builder
+FROM rust:1.84.0 AS rust-builder
 
 WORKDIR /app
 
