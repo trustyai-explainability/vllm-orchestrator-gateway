@@ -157,8 +157,19 @@ async fn orchestrator_post_request(
     url: &str,
 ) -> Result<OrchestratorResponse, anyhow::Error> {
     let client = reqwest::Client::new();
-    let response = client.post(url).json(&payload).send();
+    let response = client.post(url).json(&payload).send().await?;
+    let status = response.status();
+    let text = response.text().await?;
 
-    let json = response.await?.json().await?;
+    if !status.is_success() {
+        // Return the error with the status code and response body
+        return Err(anyhow::anyhow!(
+            "Orchestrator returned error status {}: {}",
+            status,
+            text
+        ));
+    }
+
+    let json: serde_json::Value = serde_json::from_str(&text)?;
     Ok(serde_json::from_value(json).expect("unexpected json response from request"))
 }
