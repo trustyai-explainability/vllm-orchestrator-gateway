@@ -9,7 +9,7 @@ on:
 
 jobs:
   trivy-fs:
-    name: Trivy
+    name: Trivy FS
     runs-on: ubuntu-latest
     permissions:
       contents: read
