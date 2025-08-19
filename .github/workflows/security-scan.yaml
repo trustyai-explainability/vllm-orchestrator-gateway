@@ -30,15 +30,15 @@ jobs:
           exit-code: 0
           ignore-unfixed: false
 
-      # - name: Check for critical and high vulnerabilities
-      #   uses: aquasecurity/trivy-action@77137e9dc3ab1b329b7c8a38c2eb7475850a14e8
-      #   with:
-      #     scan-type: fs
-      #     scan-ref: .
-      #     format: table
-      #     severity: CRITICAL,HIGH
-      #     exit-code: 1
-      #     ignore-unfixed: false
+      - name: Check for critical and high vulnerabilities
+        uses: aquasecurity/trivy-action@77137e9dc3ab1b329b7c8a38c2eb7475850a14e8
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: table
+          severity: CRITICAL,HIGH
+          exit-code: 1
+          ignore-unfixed: false
 
       - name: Upload SARIF to Security tab
         if: always()
