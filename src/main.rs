@@ -60,10 +60,10 @@ async fn main() {
         .compact()
         .init();
 
-    let orchestrator_client = Arc::new(
+    let (client, scheme) =
         build_orchestrator_client(&gateway_config.orchestrator.host)
-            .expect("Failed to build HTTP(s) client for communicating with orchestrator"),
-    );
+            .expect("Failed to build HTTP(s) client for communicating with orchestrator");
+    let orchestrator_client = Arc::new(client);
 
     let mut app = Router::new().layer(
         TraceLayer::new_for_http()
@@ -77,6 +77,7 @@ async fn main() {
         let path = format!("/{}/v1/chat/completions", route.name);
         let fallback_message = route.fallback_message.clone();
         let orchestrator_client = orchestrator_client.clone();
+        let scheme = scheme.clone();
         app = app.route(
             &path,
             post(
@@ -88,6 +89,7 @@ async fn main() {
                         gateway_config,
                         fallback_message,
                         orchestrator_client,
+                        scheme,
                     )
                 },
             ),
@@ -145,6 +147,7 @@ async fn handle_generation(
     gateway_config: GatewayConfig,
     route_fallback_message: Option<String>,
     orchestrator_client: Arc<reqwest::Client>,
+    scheme: String,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
     tracing::debug!("handle_generation called with payload: {:?}", payload);
 
@@ -156,11 +159,14 @@ async fn handle_generation(
 
     let url: String = match gateway_config.orchestrator.port {
         Some(port) => format!(
-            "https://{}:{}/api/v2/chat/completions-detection",
-            gateway_config.orchestrator.host, port
+            "{}://{}:{}/api/v2/chat/completions-detection",
+            scheme,
+            gateway_config.orchestrator.host,
+            port
         ),
         None => format!(
-            "https://{}/api/v2/chat/completions-detection",
+            "{}://{}/api/v2/chat/completions-detection",
+            scheme,
             gateway_config.orchestrator.host
         ),
     };
@@ -192,7 +198,7 @@ async fn handle_generation(
     }
 }
 
-fn build_orchestrator_client(hostname: &str) -> Result<reqwest::Client, anyhow::Error> {
+fn build_orchestrator_client(hostname: &str) -> Result<(reqwest::Client, String), anyhow::Error> {
     use openssl::pkcs12::Pkcs12;
     use openssl::pkey::PKey;
     use openssl::x509::X509;
@@ -205,6 +211,7 @@ fn build_orchestrator_client(hostname: &str) -> Result<reqwest::Client, anyhow::
     let ca_path = "/etc/tls/ca/service-ca.crt";
 
     let mut builder = Client::builder();
+    let mut scheme = String::from("http");
 
     // Add custom CA if it exists
     if fs::metadata(ca_path).is_ok() {
@@ -238,11 +245,14 @@ fn build_orchestrator_client(hostname: &str) -> Result<reqwest::Client, anyhow::
         let identity = Identity::from_pkcs12_der(&pkcs12_der, "")?;
 
         builder = builder.identity(identity);
+
+        // set https
+        scheme = String::from("https");
     } else {
         tracing::warn!("mTLS enabled but TLS cert or key not found, using default client");
     };
 
-    Ok(builder.build()?)
+    Ok((builder.build()?, scheme))
 }
 
 async fn orchestrator_post_request(
