@@ -30,11 +30,12 @@ fn get_orchestrator_detectors(
     for detector in detector_config {
         if detectors.contains(&detector.name) && detector.detector_params.is_some() {
             let detector_params = detector.detector_params.unwrap();
+            let key = detector.server.clone().unwrap_or_else(|| detector.name.clone());
             if detector.input {
-                input_detectors.insert(detector.name.clone(), detector_params.clone());
+                input_detectors.insert(key.clone(), detector_params.clone());
             }
             if detector.output {
-                output_detectors.insert(detector.name, detector_params);
+                output_detectors.insert(key, detector_params);
             }
         }
     }
