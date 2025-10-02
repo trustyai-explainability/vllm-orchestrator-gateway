@@ -1,6 +1,13 @@
 use axum::http::HeaderMap;
-use axum::{http::StatusCode, response::IntoResponse, routing::post, Json, Router};
+use axum::{
+    http::StatusCode,
+    response::{IntoResponse, Sse, Response},
+    routing::post,
+    Json, Router
+};
+use axum::response::sse::{Event, KeepAlive};
 use config::{validate_registered_detectors, DetectorConfig, GatewayConfig};
+use futures::StreamExt;
 use serde_json::json;
 use serde_json::{Map, Value};
 use std::error::Error;
@@ -12,12 +19,14 @@ use std::{
 };
 use tower_http::trace::{self, TraceLayer};
 use tracing::Level;
+use anyhow::Context;
 
 mod api;
 mod config;
 
 use api::{
     Detections, GenerationChoice, GenerationMessage, OrchestratorDetector, OrchestratorResponse,
+    StreamingResponse, StreamingDelta,
 };
 
 fn get_orchestrator_detectors(
@@ -79,23 +88,24 @@ async fn main() {
         let fallback_message = route.fallback_message.clone();
         let orchestrator_client = orchestrator_client.clone();
         let scheme = scheme.clone();
+
+        // Single endpoint that handles both streaming and non-streaming based on payload
         app = app.route(
             &path,
-            post(
-                |headers: HeaderMap, Json(payload): Json<serde_json::Value>| {
-                    handle_generation(
-                        headers,
-                        Json(payload),
-                        detectors,
-                        gateway_config,
-                        fallback_message,
-                        orchestrator_client,
-                        scheme,
-                    )
-                },
-            ),
+            post(move |headers: HeaderMap, Json(payload): Json<serde_json::Value>| async move {
+                handle_chat_completions(
+                    headers,
+                    Json(payload),
+                    detectors,
+                    gateway_config,
+                    fallback_message,
+                    orchestrator_client,
+                    scheme,
+                ).await
+            }),
         );
-        tracing::info!("exposed endpoints: {}", path);
+
+        tracing::info!("exposed endpoint: {}", path);
     }
 
     let mut http_port = 8090;
@@ -141,7 +151,54 @@ fn check_payload_detections(
     None
 }
 
-async fn handle_generation(
+async fn handle_chat_completions(
+    headers: HeaderMap,
+    Json(payload): Json<serde_json::Value>,
+    detectors: Vec<String>,
+    gateway_config: GatewayConfig,
+    route_fallback_message: Option<String>,
+    orchestrator_client: Arc<reqwest::Client>,
+    scheme: String,
+) -> Result<Response, (StatusCode, String)> {
+    tracing::debug!("handle_chat_completions called with payload: {:?}", payload);
+
+    // Check if streaming is requested
+    let is_streaming = payload
+        .as_object()
+        .and_then(|obj| obj.get("stream"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let result = if is_streaming {
+        handle_streaming_generation(
+            headers,
+            Json(payload),
+            detectors,
+            gateway_config,
+            route_fallback_message,
+            orchestrator_client,
+            scheme,
+        )
+        .await
+        .map(|response| response.into_response())
+    } else {
+        handle_non_streaming_generation(
+            headers,
+            Json(payload),
+            detectors,
+            gateway_config,
+            route_fallback_message,
+            orchestrator_client,
+            scheme,
+        )
+        .await
+        .map(|response| response.into_response())
+    };
+
+    result
+}
+
+async fn handle_non_streaming_generation(
     headers: HeaderMap,
     Json(mut payload): Json<serde_json::Value>,
     detectors: Vec<String>,
@@ -150,7 +207,7 @@ async fn handle_generation(
     orchestrator_client: Arc<reqwest::Client>,
     scheme: String,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    tracing::debug!("handle_generation called with payload: {:?}", payload);
+    tracing::debug!("handle_non_streaming_generation called with payload: {:?}", payload);
 
     let orchestrator_detectors =
         get_orchestrator_detectors(detectors.clone(), gateway_config.detectors.clone());
@@ -196,6 +253,98 @@ async fn handle_generation(
             StatusCode::INTERNAL_SERVER_ERROR,
             response_result.err().unwrap().to_string(),
         )),
+    }
+}
+
+async fn handle_streaming_generation(
+    headers: HeaderMap,
+    Json(mut payload): Json<serde_json::Value>,
+    detectors: Vec<String>,
+    gateway_config: GatewayConfig,
+    route_fallback_message: Option<String>,
+    orchestrator_client: Arc<reqwest::Client>,
+    scheme: String,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    tracing::debug!("handle_streaming_generation called with payload: {:?}", payload);
+
+    let orchestrator_detectors =
+        get_orchestrator_detectors(detectors.clone(), gateway_config.detectors.clone());
+    tracing::debug!("Orchestrator detectors: {:?}", orchestrator_detectors);
+
+    let mut payload = payload.as_object_mut();
+
+    let url: String = match gateway_config.orchestrator.port {
+        Some(port) => format!(
+            "{}://{}:{}/api/v2/chat/completions-detection",
+            scheme,
+            gateway_config.orchestrator.host,
+            port
+        ),
+        None => format!(
+            "{}://{}/api/v2/chat/completions-detection",
+            scheme,
+            gateway_config.orchestrator.host
+        ),
+    };
+    tracing::debug!("Orchestrator URL: {}", url);
+
+    payload.as_mut().unwrap().insert(
+        "detectors".to_string(),
+        serde_json::to_value(&orchestrator_detectors).unwrap(),
+    );
+    tracing::debug!("Payload after inserting detectors: {:?}", payload);
+
+    let response_result =
+        orchestrator_streaming_request(payload, &headers, &url, &orchestrator_client).await;
+
+    match response_result {
+        Ok(stream) => {
+            let sse_stream = stream.map(move |chunk_result| -> Result<Event, anyhow::Error> {
+                match chunk_result {
+                    Ok(chunk) => {
+                        // Check if we need to apply fallback message
+                        if let Ok(mut streaming_response) = serde_json::from_str::<StreamingResponse>(&chunk) {
+                            if let Some(fallback_message) = &route_fallback_message {
+                                if streaming_response.detections.is_some() {
+                                    // Apply fallback message to the first chunk
+                                    if streaming_response.choices.len() > 0 {
+                                        streaming_response.choices[0].delta = StreamingDelta {
+                                            content: Some(fallback_message.clone()),
+                                            role: Some("assistant".to_string()),
+                                            tool_calls: None,
+                                        };
+                                        streaming_response.choices[0].finish_reason = Some("stop".to_string());
+                                    }
+                                }
+                            }
+
+                            match serde_json::to_string(&streaming_response) {
+                                Ok(json_str) => Ok(Event::default().data(json_str)),
+                                Err(e) => {
+                                    tracing::error!("Failed to serialize streaming response: {}", e);
+                                    Ok(Event::default().data("{\"error\": \"serialization failed\"}"))
+                                }
+                            }
+                        } else {
+                            // If it's not a valid JSON chunk, pass it through as-is
+                            Ok(Event::default().data(chunk))
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("Error processing streaming chunk: {}", e);
+                        Ok(Event::default().data(format!("{{\"error\": \"{}\"}}", e)))
+                    }
+                }
+            });
+
+            Ok(Sse::new(sse_stream)
+                .keep_alive(KeepAlive::default())
+                .into_response())
+        }
+        Err(e) => {
+            tracing::error!("Streaming request failed: {}", e);
+            Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+        }
     }
 }
 
@@ -324,4 +473,75 @@ async fn orchestrator_post_request(
     let json: serde_json::Value = serde_json::from_str(&text)?;
     tracing::debug!("Parsed JSON response: {:?}", json);
     Ok(serde_json::from_value(json).expect("unexpected json response from request"))
+}
+
+async fn orchestrator_streaming_request(
+    payload: Option<&mut Map<String, Value>>,
+    headers: &HeaderMap,
+    url: &str,
+    client: &reqwest::Client,
+) -> Result<impl futures::Stream<Item = Result<String, anyhow::Error>>, anyhow::Error> {
+    tracing::debug!(
+        "Sending streaming POST request to {} with payload: {:?}",
+        url,
+        payload
+    );
+
+    let mut req = client.post(url).json(&payload);
+
+    // Forward authorization headers
+    for (name, value) in headers.iter() {
+        tracing::debug!("Header {}: {:?}", name, value);
+        let name_str = name.as_str().to_ascii_lowercase();
+        if name_str == "authorization" {
+            req = req.header(name, value);
+        }
+        if name_str.starts_with("x-forwarded") {
+            req = req.header(name, value);
+        }
+    }
+
+    let response = req
+        .send()
+        .await
+        .context("Failed to send request or connect to orchestrator: {}")?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        let err_msg = format!("Orchestrator returned error status {}: {}", status, error_text);
+        tracing::error!("{}", err_msg);
+        anyhow::bail!(err_msg);
+    }
+
+    let stream = response.bytes_stream();
+    let chunk_stream = stream.map(|chunk_result| {
+        chunk_result
+            .map_err(|e| anyhow::anyhow!("Failed to read chunk: {}", e))
+            .and_then(|chunk| {
+                let chunk_str = String::from_utf8(chunk.to_vec())
+                    .map_err(|e| anyhow::anyhow!("Invalid UTF-8 in chunk: {}", e))?;
+
+                // Parse SSE format and extract data
+                let lines: Vec<&str> = chunk_str.lines().collect();
+                let mut data_lines = Vec::new();
+
+                for line in lines {
+                    if line.starts_with("data: ") {
+                        let data = &line[6..]; // Remove "data: " prefix
+                        if data != "[DONE]" {
+                            data_lines.push(data.to_string());
+                        }
+                    }
+                }
+
+                if data_lines.is_empty() {
+                    Ok("".to_string())
+                } else {
+                    Ok(data_lines.join("\n"))
+                }
+            })
+    });
+
+    Ok(chunk_stream)
 }

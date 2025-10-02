@@ -78,3 +78,32 @@ pub struct OrchestratorResponse {
     pub detections: Option<Detections>,
     pub warnings: Option<Vec<HashMap<String, String>>>,
 }
+
+// Streaming response structures
+#[derive(Serialize, Deserialize, Debug)]
+pub struct StreamingDelta {
+    pub content: Option<String>,
+    pub role: Option<String>,
+    pub tool_calls: Option<serde_json::Value>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct StreamingChoice {
+    pub index: u32,
+    pub delta: StreamingDelta,
+    pub logprobs: Option<serde_json::Value>,
+    pub finish_reason: Option<String>,
+    pub stop_reason: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct StreamingResponse {
+    pub id: String,
+    pub object: String,
+    pub created: u64,
+    pub model: String,
+    pub choices: Vec<StreamingChoice>,
+    pub usage: Option<serde_json::Value>,
+    pub detections: Option<Detections>,
+    pub warnings: Option<Vec<HashMap<String, String>>>,
+}
