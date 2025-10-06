@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs;
 
 use serde::Deserialize;
@@ -67,49 +68,43 @@ pub fn validate_registered_detectors(gateway_cfg: &GatewayConfig) {
         .map(|detector| &detector.name)
         .collect();
 
+    let mut issues = Vec::new();
     for route in gateway_cfg.routes.iter() {
         for detector in &route.detectors {
             if !detector_names.contains(&detector) {
-                panic!(
-                    "could not find detector {} in route {}",
+                issues.push(format!(
+                    "- could not find detector '{}' in route '{}'",
                     detector, route.name
-                );
+                ));
             }
         }
 
         // Validate no duplicate input/output servers
-        let mut input_servers = Vec::new();
-        let mut output_servers = Vec::new();
+        let mut seen_input = HashSet::new();
+        let mut seen_output = HashSet::new();
+
         for detector_name in &route.detectors {
             if let Some(detector_cfg) = gateway_cfg.detectors.iter().find(|d| &d.name == detector_name) {
                 if detector_cfg.input {
-                    input_servers.push(detector_cfg.server.as_ref().unwrap());
+                    let server = detector_cfg.server.as_ref().unwrap();
+                    if !seen_input.insert(server) {
+                        issues.push(format!(
+                            "- route '{}' contains more than one input detector with server '{}'",
+                            route.name, server
+                        ));
+                    }
+                    if !seen_output.insert(server) {
+                        issues.push(format!(
+                            "- route '{}' contains more than one output detector with server '{}'",
+                            route.name, server
+                        ));
+                    }
                 }
-                if detector_cfg.output {
-                    output_servers.push(detector_cfg.server.as_ref().unwrap());
-                }
             }
         }
-        // Check for duplicates
-        use std::collections::HashSet;
-        let mut seen = HashSet::new();
-        for server in &input_servers {
-            if !seen.insert(server) {
-                panic!(
-                    "route '{}' contains more than one input detector with server '{}'",
-                    route.name, server
-                );
-            }
-        }
-        let mut seen = HashSet::new();
-        for server in &output_servers {
-            if !seen.insert(server) {
-                panic!(
-                    "route '{}' contains more than one output detector with server '{}'",
-                    route.name, server
-                );
-            }
-        }
+    }
+    if !issues.is_empty() {
+        panic!("Config validation failed:\n{}", issues.join("\n"));
     }
 }
 
