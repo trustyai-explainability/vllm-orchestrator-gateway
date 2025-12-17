@@ -1,0 +1,38 @@
+name: Tier 1 - Security scan
+
+on:
+  pull_request:
+    branches:
+      - main
+      - incubation
+      - stable
+
+jobs:
+  trivy-fs-scan:
+    name: Trivy Filesystem Security Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy filesystem scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-fs-results.sarif'
+          severity: 'MEDIUM,HIGH,CRITICAL'
+          exit-code: '0'
+          ignore-unfixed: false
+          vuln-type: 'os,library'
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-fs-results.sarif'
