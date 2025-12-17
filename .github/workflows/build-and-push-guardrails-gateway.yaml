@@ -106,19 +106,3 @@ jobs:
             PR image build completed successfully!
             
             📦 [PR image](https://quay.io/trustyai/guardrails-sidecar-gateway-ci?tab=tags): `quay.io/trustyai/guardrails-sidecar-gateway-ci:${{ github.event.pull_request.head.sha }}`
-      - name: Trivy scan
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          scan-type: 'image'
-          image-ref: "${{ env.IMAGE_NAME }}:${{ env.TAG }}"
-          format: 'sarif'
-          output: 'trivy-results.sarif'
-          severity: 'MEDIUM,HIGH,CRITICAL'
-          exit-code: '0'
-          ignore-unfixed: false
-          vuln-type: 'os,library'
-
-      - name: Update Security tab
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: 'trivy-results.sarif'
