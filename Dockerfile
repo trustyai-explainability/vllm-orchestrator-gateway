@@ -3,13 +3,30 @@ ARG UBI_BASE_IMAGE_TAG=latest
 
 ## Rust builder ################################################################
 # Specific debian version so that compatible glibc version is used
-FROM rust:1.84.0 AS rust-builder
+FROM ${UBI_MINIMAL_BASE_IMAGE}:${UBI_BASE_IMAGE_TAG} AS rust-builder
+ARG PROTOC_VERSION
 
-WORKDIR /app
+ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
+
+# Install dependencies
+RUN microdnf --disableplugin=subscription-manager -y update && \
+    microdnf install --disableplugin=subscription-manager -y \
+        unzip \
+        ca-certificates \
+        openssl-devel \
+        gcc && \
+    microdnf clean all
 
 COPY rust-toolchain.toml rust-toolchain.toml
 
-RUN rustup component add rustfmt
+# Install rustup [needed for latest Rust versions]
+RUN curl https://sh.rustup.rs -sSf | sh -s -- --default-toolchain none -y --no-modify-path && \
+    . "$HOME/.cargo/env" && \
+    rustup install && \
+    rustup component add rustfmt
+
+# Set PATH so rustc, cargo, rustup are available
+ENV PATH="/root/.cargo/bin:${PATH}"
 
 ## Gateway builder #########################################################
 FROM rust-builder AS gateway-builder
