@@ -1,48 +1,37 @@
-ARG UBI_MINIMAL_BASE_IMAGE=registry.access.redhat.com/ubi9/ubi-minimal
-ARG UBI_BASE_IMAGE_TAG=latest
+ARG BASE_IMAGE=registry.access.redhat.com/ubi9/ubi-minimal:9.8@sha256:5b74fce9d6e629942a0c6dc0f546c193e70d7f974d999a48c948c53dd3d36362
 
 ## Rust builder ################################################################
-# Specific debian version so that compatible glibc version is used
-FROM rust:1.84.0 AS rust-builder
+FROM ${BASE_IMAGE} AS rust-builder
+
+RUN microdnf install -y --disableplugin=subscription-manager \
+        rust \
+        cargo \
+        gcc \
+        openssl-devel && \
+    microdnf clean all --disableplugin=subscription-manager
 
 WORKDIR /app
 
-COPY rust-toolchain.toml rust-toolchain.toml
-
-RUN rustup component add rustfmt
-
-## Gateway builder #########################################################
-FROM rust-builder AS gateway-builder
-
-COPY *.toml /app/
+COPY Cargo.toml Cargo.lock /app/
 COPY src/ /app/src/
-# COPY config/config.yaml /app/config/config.yaml
-
-WORKDIR /app
 
 RUN cargo install --root /app/ --path .
 
-## Tests stage ##################################################################
-FROM gateway-builder AS tests
-RUN cargo test
+## Release image ################################################################
+FROM ${BASE_IMAGE} AS release
 
-## Lint stage ###################################################################
-FROM gateway-builder AS lint
-RUN cargo clippy --all-targets --all-features -- -D warnings
-
-## Formatting check stage #######################################################
-FROM gateway-builder AS format
-RUN cargo fmt --check
-
-## Release Image ################################################################
-
-FROM ${UBI_MINIMAL_BASE_IMAGE}:${UBI_BASE_IMAGE_TAG} AS gateway-release
-ENV GATEWAY_CONFIG=/app/config/config.yaml
+COPY --from=rust-builder /app/bin/ /app/bin/
 COPY config/config.yaml /app/config/config.yaml
 
-COPY --from=gateway-builder /app/bin/ /app/bin/
+USER 1001
 
-RUN microdnf install -y --disableplugin=subscription-manager shadow-utils compat-openssl11 && \
-    microdnf clean all --disableplugin=subscription-manager
-
+ENV GATEWAY_CONFIG=/app/config/config.yaml
 CMD ["/app/bin/vllm-orchestrator-gateway"]
+
+LABEL com.redhat.component="odh-trustyai-vllm-orchestrator-gateway-rhel9" \
+      name="rhoai/odh-trustyai-vllm-orchestrator-gateway-rhel9" \
+      io.k8s.display-name="odh-trustyai-vllm-orchestrator-gateway-rhel9" \
+      io.k8s.description="OpenAI-compatible REST gateway that routes chat requests with configurable detector-based filtering and route-specific safety policies" \
+      description="OpenAI-compatible REST gateway that routes chat requests with configurable detector-based filtering and route-specific safety policies" \
+      summary="vLLM Orchestrator Gateway for detector-based chat completion filtering" \
+      com.redhat.license_terms="https://www.redhat.com/licenses/Red_Hat_Standard_EULA_20191108.pdf"
