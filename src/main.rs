@@ -1,11 +1,12 @@
+use anyhow::Context;
 use axum::http::HeaderMap;
+use axum::response::sse::{Event, KeepAlive};
 use axum::{
     http::StatusCode,
-    response::{IntoResponse, Sse, Response},
+    response::{IntoResponse, Response, Sse},
     routing::post,
-    Json, Router
+    Json, Router,
 };
-use axum::response::sse::{Event, KeepAlive};
 use config::{validate_registered_detectors, DetectorConfig, GatewayConfig};
 use futures::StreamExt;
 use serde_json::json;
@@ -19,14 +20,13 @@ use std::{
 };
 use tower_http::trace::{self, TraceLayer};
 use tracing::Level;
-use anyhow::Context;
 
 mod api;
 mod config;
 
 use api::{
     Detections, GenerationChoice, GenerationMessage, OrchestratorDetector, OrchestratorResponse,
-    StreamingResponse, StreamingDelta,
+    StreamingDelta, StreamingResponse,
 };
 
 fn get_orchestrator_detectors(
@@ -39,7 +39,10 @@ fn get_orchestrator_detectors(
     for detector in detector_config {
         if detectors.contains(&detector.name) && detector.detector_params.is_some() {
             let detector_params = detector.detector_params.unwrap();
-            let key = detector.server.clone().unwrap_or_else(|| detector.name.clone());
+            let key = detector
+                .server
+                .clone()
+                .unwrap_or_else(|| detector.name.clone());
             if detector.input {
                 input_detectors.insert(key.clone(), detector_params.clone());
             }
@@ -70,9 +73,8 @@ async fn main() {
         .compact()
         .init();
 
-    let (client, scheme) =
-        build_orchestrator_client(&gateway_config.orchestrator.host)
-            .expect("Failed to build HTTP(s) client for communicating with orchestrator");
+    let (client, scheme) = build_orchestrator_client(&gateway_config.orchestrator.host)
+        .expect("Failed to build HTTP(s) client for communicating with orchestrator");
     let orchestrator_client = Arc::new(client);
 
     let mut app = Router::new().layer(
@@ -92,17 +94,20 @@ async fn main() {
         // Single endpoint that handles both streaming and non-streaming based on payload
         app = app.route(
             &path,
-            post(move |headers: HeaderMap, Json(payload): Json<serde_json::Value>| async move {
-                handle_chat_completions(
-                    headers,
-                    Json(payload),
-                    detectors,
-                    gateway_config,
-                    fallback_message,
-                    orchestrator_client,
-                    scheme,
-                ).await
-            }),
+            post(
+                move |headers: HeaderMap, Json(payload): Json<serde_json::Value>| async move {
+                    handle_chat_completions(
+                        headers,
+                        Json(payload),
+                        detectors,
+                        gateway_config,
+                        fallback_message,
+                        orchestrator_client,
+                        scheme,
+                    )
+                    .await
+                },
+            ),
         );
 
         tracing::info!("exposed endpoint: {}", path);
@@ -169,7 +174,7 @@ async fn handle_chat_completions(
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    let result = if is_streaming {
+    if is_streaming {
         handle_streaming_generation(
             headers,
             Json(payload),
@@ -193,9 +198,7 @@ async fn handle_chat_completions(
         )
         .await
         .map(|response| response.into_response())
-    };
-
-    result
+    }
 }
 
 async fn handle_non_streaming_generation(
@@ -207,7 +210,10 @@ async fn handle_non_streaming_generation(
     orchestrator_client: Arc<reqwest::Client>,
     scheme: String,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    tracing::debug!("handle_non_streaming_generation called with payload: {:?}", payload);
+    tracing::debug!(
+        "handle_non_streaming_generation called with payload: {:?}",
+        payload
+    );
 
     let orchestrator_detectors =
         get_orchestrator_detectors(detectors.clone(), gateway_config.detectors.clone());
@@ -218,14 +224,11 @@ async fn handle_non_streaming_generation(
     let url: String = match gateway_config.orchestrator.port {
         Some(port) => format!(
             "{}://{}:{}/api/v2/chat/completions-detection",
-            scheme,
-            gateway_config.orchestrator.host,
-            port
+            scheme, gateway_config.orchestrator.host, port
         ),
         None => format!(
             "{}://{}/api/v2/chat/completions-detection",
-            scheme,
-            gateway_config.orchestrator.host
+            scheme, gateway_config.orchestrator.host
         ),
     };
     tracing::debug!("Orchestrator URL: {}", url);
@@ -265,7 +268,10 @@ async fn handle_streaming_generation(
     orchestrator_client: Arc<reqwest::Client>,
     scheme: String,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    tracing::debug!("handle_streaming_generation called with payload: {:?}", payload);
+    tracing::debug!(
+        "handle_streaming_generation called with payload: {:?}",
+        payload
+    );
 
     let orchestrator_detectors =
         get_orchestrator_detectors(detectors.clone(), gateway_config.detectors.clone());
@@ -276,14 +282,11 @@ async fn handle_streaming_generation(
     let url: String = match gateway_config.orchestrator.port {
         Some(port) => format!(
             "{}://{}:{}/api/v2/chat/completions-detection",
-            scheme,
-            gateway_config.orchestrator.host,
-            port
+            scheme, gateway_config.orchestrator.host, port
         ),
         None => format!(
             "{}://{}/api/v2/chat/completions-detection",
-            scheme,
-            gateway_config.orchestrator.host
+            scheme, gateway_config.orchestrator.host
         ),
     };
     tracing::debug!("Orchestrator URL: {}", url);
@@ -303,17 +306,20 @@ async fn handle_streaming_generation(
                 match chunk_result {
                     Ok(chunk) => {
                         // Check if we need to apply fallback message
-                        if let Ok(mut streaming_response) = serde_json::from_str::<StreamingResponse>(&chunk) {
+                        if let Ok(mut streaming_response) =
+                            serde_json::from_str::<StreamingResponse>(&chunk)
+                        {
                             if let Some(fallback_message) = &route_fallback_message {
                                 if streaming_response.detections.is_some() {
                                     // Apply fallback message to the first chunk
-                                    if streaming_response.choices.len() > 0 {
+                                    if !streaming_response.choices.is_empty() {
                                         streaming_response.choices[0].delta = StreamingDelta {
                                             content: Some(fallback_message.clone()),
                                             role: Some("assistant".to_string()),
                                             tool_calls: None,
                                         };
-                                        streaming_response.choices[0].finish_reason = Some("stop".to_string());
+                                        streaming_response.choices[0].finish_reason =
+                                            Some("stop".to_string());
                                     }
                                 }
                             }
@@ -321,8 +327,12 @@ async fn handle_streaming_generation(
                             match serde_json::to_string(&streaming_response) {
                                 Ok(json_str) => Ok(Event::default().data(json_str)),
                                 Err(e) => {
-                                    tracing::error!("Failed to serialize streaming response: {}", e);
-                                    Ok(Event::default().data("{\"error\": \"serialization failed\"}"))
+                                    tracing::error!(
+                                        "Failed to serialize streaming response: {}",
+                                        e
+                                    );
+                                    Ok(Event::default()
+                                        .data("{\"error\": \"serialization failed\"}"))
                                 }
                             }
                         } else {
@@ -508,8 +518,14 @@ async fn orchestrator_streaming_request(
 
     let status = response.status();
     if !status.is_success() {
-        let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-        let err_msg = format!("Orchestrator returned error status {}: {}", status, error_text);
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        let err_msg = format!(
+            "Orchestrator returned error status {}: {}",
+            status, error_text
+        );
         tracing::error!("{}", err_msg);
         anyhow::bail!(err_msg);
     }
@@ -527,8 +543,7 @@ async fn orchestrator_streaming_request(
                 let mut data_lines = Vec::new();
 
                 for line in lines {
-                    if line.starts_with("data: ") {
-                        let data = &line[6..]; // Remove "data: " prefix
+                    if let Some(data) = line.strip_prefix("data: ") {
                         if data != "[DONE]" {
                             data_lines.push(data.to_string());
                         }
