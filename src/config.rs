@@ -52,12 +52,17 @@ pub struct RouteConfig {
     pub fallback_message: Option<String>,
 }
 
-
 pub fn read_config(path: &str) -> GatewayConfig {
-    let result = fs::read_to_string(path).expect(&format!("could not read file: {}", path));
+    let result =
+        fs::read_to_string(path).unwrap_or_else(|_| panic!("could not read file: {}", path));
 
-    let mut cfg: GatewayConfig = serde_yml::from_str(&result).expect("failed to read in yaml config");
-    cfg.detectors = cfg.detectors.into_iter().map(|d| d.with_server_default()).collect();
+    let mut cfg: GatewayConfig =
+        serde_yml::from_str(&result).expect("failed to read in yaml config");
+    cfg.detectors = cfg
+        .detectors
+        .into_iter()
+        .map(|d| d.with_server_default())
+        .collect();
     cfg
 }
 
@@ -84,7 +89,11 @@ pub fn validate_registered_detectors(gateway_cfg: &GatewayConfig) {
         let mut seen_output = HashSet::new();
 
         for detector_name in &route.detectors {
-            if let Some(detector_cfg) = gateway_cfg.detectors.iter().find(|d| &d.name == detector_name) {
+            if let Some(detector_cfg) = gateway_cfg
+                .detectors
+                .iter()
+                .find(|d| &d.name == detector_name)
+            {
                 if detector_cfg.input {
                     let server = detector_cfg.server.as_ref().unwrap();
                     if !seen_input.insert(server) {
@@ -145,20 +154,21 @@ mod tests {
                 host: "localhost".to_string(),
                 port: Some(1234),
             },
-            detectors: vec![DetectorConfig {
-                name: "regex-1".to_string(),
-                server: Some("server-a".to_string()),
-                input: true,
-                output: false,
-                detector_params: None,
-            }, DetectorConfig {
-                name: "regex-2".to_string(),
-                server: Some("server-a".to_string()),
-                input: true,
-                output: false,
-                detector_params: None,
-            },
-
+            detectors: vec![
+                DetectorConfig {
+                    name: "regex-1".to_string(),
+                    server: Some("server-a".to_string()),
+                    input: true,
+                    output: false,
+                    detector_params: None,
+                },
+                DetectorConfig {
+                    name: "regex-2".to_string(),
+                    server: Some("server-a".to_string()),
+                    input: true,
+                    output: false,
+                    detector_params: None,
+                },
             ],
             routes: vec![RouteConfig {
                 name: "route1".to_string(),
@@ -178,20 +188,21 @@ mod tests {
                 host: "localhost".to_string(),
                 port: Some(1234),
             },
-            detectors: vec![DetectorConfig {
-                name: "regex-1".to_string(),
-                server: Some("server-a".to_string()),
-                input: false,
-                output: true,
-                detector_params: None,
-            }, DetectorConfig {
-                name: "regex-2".to_string(),
-                server: Some("server-a".to_string()),
-                input: false,
-                output: true,
-                detector_params: None,
-            },
-
+            detectors: vec![
+                DetectorConfig {
+                    name: "regex-1".to_string(),
+                    server: Some("server-a".to_string()),
+                    input: false,
+                    output: true,
+                    detector_params: None,
+                },
+                DetectorConfig {
+                    name: "regex-2".to_string(),
+                    server: Some("server-a".to_string()),
+                    input: false,
+                    output: true,
+                    detector_params: None,
+                },
             ],
             routes: vec![RouteConfig {
                 name: "route1".to_string(),
@@ -210,20 +221,21 @@ mod tests {
                 host: "localhost".to_string(),
                 port: Some(1234),
             },
-            detectors: vec![DetectorConfig {
-                name: "regex-1".to_string(),
-                server: Some("server-a".to_string()),
-                input: true,
-                output: false,
-                detector_params: None,
-            }, DetectorConfig {
-                name: "regex-2".to_string(),
-                server: Some("server-a".to_string()),
-                input: false,
-                output: true,
-                detector_params: None,
-            },
-
+            detectors: vec![
+                DetectorConfig {
+                    name: "regex-1".to_string(),
+                    server: Some("server-a".to_string()),
+                    input: true,
+                    output: false,
+                    detector_params: None,
+                },
+                DetectorConfig {
+                    name: "regex-2".to_string(),
+                    server: Some("server-a".to_string()),
+                    input: false,
+                    output: true,
+                    detector_params: None,
+                },
             ],
             routes: vec![RouteConfig {
                 name: "route1".to_string(),
